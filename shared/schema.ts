@@ -16,3 +16,18 @@ export const insertUserSchema = createInsertSchema(users).pick({
 
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
+
+export interface GeoJSONFeature {
+  type: "Feature";
+  geometry: {
+    type: "Point" | "LineString" | "Polygon" | "MultiPoint" | "MultiLineString" | "MultiPolygon";
+    coordinates: any;
+  };
+  properties: Record<string, any>;
+  id?: string | number;
+}
+
+export interface GeoJSONFeatureCollection {
+  type: "FeatureCollection";
+  features: GeoJSONFeature[];
+}
