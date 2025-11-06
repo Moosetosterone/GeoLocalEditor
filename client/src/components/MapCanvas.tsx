@@ -15,7 +15,6 @@ interface MapCanvasProps {
   onFeatureSelect?: (feature: GeoJSONFeature | null) => void;
   selectedFeature?: GeoJSONFeature | null;
   drawMode?: "none" | "point" | "line" | "polygon";
-  isPanelCollapsed?: boolean;
 }
 
 type BaseMap = "standard" | "satellite" | "light" | "dark" | "terrain";
@@ -48,7 +47,7 @@ const baseMaps = {
   }
 };
 
-export function MapCanvas({ data, onFeatureAdd, onFeatureSelect, selectedFeature, drawMode = "none", isPanelCollapsed = false }: MapCanvasProps) {
+export function MapCanvas({ data, onFeatureAdd, onFeatureSelect, selectedFeature, drawMode = "none" }: MapCanvasProps) {
   const mapRef = useRef<any>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const layersRef = useRef<any[]>([]);
@@ -256,14 +255,6 @@ export function MapCanvas({ data, onFeatureAdd, onFeatureSelect, selectedFeature
     tileLayerRef.current = newTileLayer;
     setBaseMap(newBaseMap);
   };
-
-  useEffect(() => {
-    if (mapRef.current) {
-      setTimeout(() => {
-        mapRef.current.invalidateSize();
-      }, 300);
-    }
-  }, [isPanelCollapsed]);
 
   return (
     <div className="relative w-full h-full">

@@ -178,7 +178,7 @@ export default function Editor() {
         onClear={handleClear}
       />
       
-      <div className="flex flex-1 overflow-hidden relative">
+      <div className="flex flex-1 overflow-hidden">
         <div className={`relative transition-all duration-300 ${isPanelCollapsed ? 'w-full' : 'flex-1'}`}>
           <div className="absolute top-4 left-4 z-[1000]">
             <DrawingToolbar activeTool={drawMode} onToolChange={setDrawMode} />
@@ -189,21 +189,19 @@ export default function Editor() {
             onFeatureSelect={setSelectedFeature}
             selectedFeature={selectedFeature}
             drawMode={drawMode}
-            isPanelCollapsed={isPanelCollapsed}
           />
         </div>
 
-        <Button
-          size="icon"
-          variant="ghost"
-          className={`absolute top-1/2 -translate-y-1/2 z-[2000] w-8 h-16 rounded-r-none transition-all duration-300 ${isPanelCollapsed ? 'right-2' : 'left-1/2 -ml-4'}`}
-          onClick={() => setIsPanelCollapsed(!isPanelCollapsed)}
-          data-testid="button-toggle-panel"
-        >
-          {isPanelCollapsed ? <ChevronLeft className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-        </Button>
-
         <div className={`relative flex flex-col transition-all duration-300 ${isPanelCollapsed ? 'w-0' : 'flex-1'}`}>
+          <Button
+            size="icon"
+            variant="ghost"
+            className="absolute -left-8 top-1/2 -translate-y-1/2 z-[1001] w-8 h-16 rounded-r-none"
+            onClick={() => setIsPanelCollapsed(!isPanelCollapsed)}
+            data-testid="button-toggle-panel"
+          >
+            {isPanelCollapsed ? <ChevronLeft className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+          </Button>
 
           <div className={`flex-1 flex flex-col ${isPanelCollapsed ? 'invisible' : ''}`}>
             <Tabs defaultValue="code" className="flex-1 flex flex-col">
