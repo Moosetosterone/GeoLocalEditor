@@ -178,8 +178,8 @@ export default function Editor() {
         onClear={handleClear}
       />
       
-      <div className="flex flex-1 overflow-hidden relative">
-        <div className={`relative border-r border-border transition-all duration-300 ${isPanelCollapsed ? 'w-full' : 'flex-1'}`}>
+      <div className="flex flex-1 overflow-hidden">
+        <div className={`relative transition-all duration-300 ${isPanelCollapsed ? 'w-full' : 'flex-1'}`}>
           <div className="absolute top-4 left-4 z-[1000]">
             <DrawingToolbar activeTool={drawMode} onToolChange={setDrawMode} />
           </div>
@@ -192,54 +192,56 @@ export default function Editor() {
           />
         </div>
 
-        <Button
-          size="icon"
-          variant="ghost"
-          className={`absolute top-1/2 -translate-y-1/2 z-[1001] w-8 h-16 rounded-r-none border-r-0 transition-all duration-300 ${isPanelCollapsed ? 'right-0' : 'right-[50%]'}`}
-          onClick={() => setIsPanelCollapsed(!isPanelCollapsed)}
-          data-testid="button-toggle-panel"
-        >
-          {isPanelCollapsed ? <ChevronLeft className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-        </Button>
+        <div className={`relative flex flex-col transition-all duration-300 ${isPanelCollapsed ? 'w-0' : 'flex-1'}`}>
+          <Button
+            size="icon"
+            variant="ghost"
+            className="absolute -left-8 top-1/2 -translate-y-1/2 z-[1001] w-8 h-16 rounded-r-none"
+            onClick={() => setIsPanelCollapsed(!isPanelCollapsed)}
+            data-testid="button-toggle-panel"
+          >
+            {isPanelCollapsed ? <ChevronLeft className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+          </Button>
 
-        <div className={`flex flex-col transition-all duration-300 ${isPanelCollapsed ? 'w-0 overflow-hidden' : 'flex-1'}`}>
-          <Tabs defaultValue="code" className="flex-1 flex flex-col">
-            <TabsList className="w-full justify-start rounded-none border-b h-10 bg-background">
-              <TabsTrigger value="code" className="data-[state=active]:bg-accent" data-testid="tab-code">
-                JSON
-              </TabsTrigger>
-              <TabsTrigger value="table" className="data-[state=active]:bg-accent" data-testid="tab-table">
-                Table
-              </TabsTrigger>
-              <TabsTrigger value="properties" className="data-[state=active]:bg-accent" data-testid="tab-properties">
-                Properties
-              </TabsTrigger>
-            </TabsList>
-            
-            <TabsContent value="code" className="flex-1 m-0 overflow-hidden">
-              <CodeEditor
-                value={codeValue}
-                onChange={handleCodeChange}
-                error={codeError}
-              />
-            </TabsContent>
-            
-            <TabsContent value="table" className="flex-1 m-0 overflow-hidden">
-              <FeatureTable
-                features={geoData.features}
-                selectedFeature={selectedFeature}
-                onFeatureSelect={setSelectedFeature}
-                onFeatureDelete={handleFeatureDelete}
-              />
-            </TabsContent>
-            
-            <TabsContent value="properties" className="flex-1 m-0 overflow-hidden">
-              <PropertyEditor
-                feature={selectedFeature}
-                onPropertyChange={handlePropertyChange}
-              />
-            </TabsContent>
-          </Tabs>
+          <div className={`flex-1 flex flex-col ${isPanelCollapsed ? 'invisible' : ''}`}>
+            <Tabs defaultValue="code" className="flex-1 flex flex-col">
+              <TabsList className="w-full justify-start rounded-none border-b h-10 bg-background">
+                <TabsTrigger value="code" className="data-[state=active]:bg-accent" data-testid="tab-code">
+                  JSON
+                </TabsTrigger>
+                <TabsTrigger value="table" className="data-[state=active]:bg-accent" data-testid="tab-table">
+                  Table
+                </TabsTrigger>
+                <TabsTrigger value="properties" className="data-[state=active]:bg-accent" data-testid="tab-properties">
+                  Properties
+                </TabsTrigger>
+              </TabsList>
+              
+              <TabsContent value="code" className="flex-1 m-0 overflow-hidden">
+                <CodeEditor
+                  value={codeValue}
+                  onChange={handleCodeChange}
+                  error={codeError}
+                />
+              </TabsContent>
+              
+              <TabsContent value="table" className="flex-1 m-0 overflow-hidden">
+                <FeatureTable
+                  features={geoData.features}
+                  selectedFeature={selectedFeature}
+                  onFeatureSelect={setSelectedFeature}
+                  onFeatureDelete={handleFeatureDelete}
+                />
+              </TabsContent>
+              
+              <TabsContent value="properties" className="flex-1 m-0 overflow-hidden">
+                <PropertyEditor
+                  feature={selectedFeature}
+                  onPropertyChange={handlePropertyChange}
+                />
+              </TabsContent>
+            </Tabs>
+          </div>
         </div>
       </div>
     </div>
