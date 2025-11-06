@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { GeoJSONFeature, GeoJSONFeatureCollection } from "@shared/schema";
 import { Button } from "@/components/ui/button";
 import { ZoomIn, ZoomOut, Maximize2 } from "lucide-react";
@@ -17,12 +17,44 @@ interface MapCanvasProps {
   drawMode?: "none" | "point" | "line" | "polygon";
 }
 
+type BaseMap = "standard" | "satellite" | "light" | "dark" | "terrain";
+
+const baseMaps = {
+  standard: {
+    name: "Standard",
+    url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+  },
+  satellite: {
+    name: "Satellite",
+    url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    attribution: 'Tiles &copy; Esri'
+  },
+  light: {
+    name: "Light",
+    url: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
+  },
+  dark: {
+    name: "Dark",
+    url: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
+  },
+  terrain: {
+    name: "Terrain",
+    url: "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png",
+    attribution: 'Map data: &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>, SRTM | Map style: &copy; <a href="https://opentopomap.org">OpenTopoMap</a>'
+  }
+};
+
 export function MapCanvas({ data, onFeatureAdd, onFeatureSelect, selectedFeature, drawMode = "none" }: MapCanvasProps) {
   const mapRef = useRef<any>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const layersRef = useRef<any[]>([]);
   const drawingLayerRef = useRef<any>(null);
   const currentDrawingRef = useRef<number[][]>([]);
+  const tileLayerRef = useRef<any>(null);
+  const [baseMap, setBaseMap] = useState<BaseMap>("standard");
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
@@ -41,11 +73,12 @@ export function MapCanvas({ data, onFeatureAdd, onFeatureSelect, selectedFeature
         zoomControl: false,
       }).setView([20, 0], 2);
 
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      const tileLayer = L.tileLayer(baseMaps.standard.url, {
+        attribution: baseMaps.standard.attribution,
         maxZoom: 19,
       }).addTo(map);
 
+      tileLayerRef.current = tileLayer;
       mapRef.current = map;
 
       map.on('click', (e: any) => {
@@ -205,10 +238,43 @@ export function MapCanvas({ data, onFeatureAdd, onFeatureSelect, selectedFeature
     }
   };
 
+  const handleBaseMapChange = (newBaseMap: BaseMap) => {
+    if (!mapRef.current || !tileLayerRef.current || !window.L) return;
+    
+    const L = window.L;
+    const map = mapRef.current;
+    
+    map.removeLayer(tileLayerRef.current);
+    
+    const baseMapConfig = baseMaps[newBaseMap];
+    const newTileLayer = L.tileLayer(baseMapConfig.url, {
+      attribution: baseMapConfig.attribution,
+      maxZoom: 19,
+    }).addTo(map);
+    
+    tileLayerRef.current = newTileLayer;
+    setBaseMap(newBaseMap);
+  };
+
   return (
     <div className="relative w-full h-full">
       <div ref={containerRef} className="w-full h-full" data-testid="map-canvas" />
       
+      <div className="absolute bottom-4 left-4 flex gap-1 z-[1000]">
+        {(Object.keys(baseMaps) as BaseMap[]).map((key) => (
+          <Button
+            key={key}
+            size="sm"
+            variant={baseMap === key ? "default" : "secondary"}
+            onClick={() => handleBaseMapChange(key)}
+            data-testid={`button-basemap-${key}`}
+            className="h-8 text-xs"
+          >
+            {baseMaps[key].name}
+          </Button>
+        ))}
+      </div>
+
       <div className="absolute bottom-4 right-4 flex flex-col gap-1 z-[1000]">
         <Button
           size="icon"
