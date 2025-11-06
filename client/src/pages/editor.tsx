@@ -177,7 +177,7 @@ export default function Editor() {
       
       <div className="flex flex-1 overflow-hidden">
         <div className="flex-1 relative border-r border-border">
-          <div className="absolute top-4 left-4 z-10">
+          <div className="absolute top-4 left-4 z-[1000]">
             <DrawingToolbar activeTool={drawMode} onToolChange={setDrawMode} />
           </div>
           <MapCanvas
