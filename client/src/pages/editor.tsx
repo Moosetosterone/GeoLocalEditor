@@ -11,7 +11,6 @@ import { Button } from "@/components/ui/button";
 import { ChevronRight, ChevronLeft } from "lucide-react";
 import { createEmptyFeatureCollection, validateGeoJSON, formatGeoJSON, csvToGeoJSON, geoJSONToCSV } from "@/lib/geojson-utils";
 import { useToast } from "@/hooks/use-toast";
-import { ResizableHandle } from "@/components/ui/resizable";
 
 export default function Editor() {
   const [geoData, setGeoData] = useState<GeoJSONFeatureCollection>(createEmptyFeatureCollection);
@@ -192,8 +191,6 @@ export default function Editor() {
             drawMode={drawMode}
           />
         </div>
-
-        <ResizableHandle withHandle className="z-[1001]" />
 
         <div className={`relative flex flex-col transition-all duration-300 ${isPanelCollapsed ? 'w-0' : 'flex-1'}`}>
           <Button
