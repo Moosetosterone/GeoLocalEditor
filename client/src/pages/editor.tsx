@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { ChevronRight, ChevronLeft } from "lucide-react";
 import { createEmptyFeatureCollection, validateGeoJSON, formatGeoJSON, csvToGeoJSON, geoJSONToCSV } from "@/lib/geojson-utils";
 import { useToast } from "@/hooks/use-toast";
+import { ResizableHandle } from "@/components/ui/resizable";
 
 export default function Editor() {
   const [geoData, setGeoData] = useState<GeoJSONFeatureCollection>(createEmptyFeatureCollection);
@@ -41,7 +42,7 @@ export default function Editor() {
   const handleCodeChange = (value: string) => {
     setCodeValue(value);
     const result = validateGeoJSON(value);
-    
+
     if (result.valid && result.data) {
       setCodeError(null);
       setGeoData(result.data);
@@ -82,10 +83,10 @@ export default function Editor() {
 
   const handlePropertyChange = (properties: Record<string, any>) => {
     if (!selectedFeature) return;
-    
+
     const newData = {
       ...geoData,
-      features: geoData.features.map(f => 
+      features: geoData.features.map(f =>
         f.id === selectedFeature.id ? { ...f, properties } : f
       )
     };
@@ -108,7 +109,7 @@ export default function Editor() {
 
   const handleImport = async (file: File) => {
     const text = await file.text();
-    
+
     if (file.name.endsWith('.csv')) {
       const data = csvToGeoJSON(text);
       setGeoData(data);
@@ -177,7 +178,7 @@ export default function Editor() {
         onExport={handleExport}
         onClear={handleClear}
       />
-      
+
       <div className="flex flex-1 overflow-hidden">
         <div className={`relative transition-all duration-300 ${isPanelCollapsed ? 'w-full' : 'flex-1'}`}>
           <div className="absolute top-4 left-4 z-[1000]">
@@ -191,6 +192,8 @@ export default function Editor() {
             drawMode={drawMode}
           />
         </div>
+
+        <ResizableHandle withHandle className="z-[1001]" />
 
         <div className={`relative flex flex-col transition-all duration-300 ${isPanelCollapsed ? 'w-0' : 'flex-1'}`}>
           <Button
@@ -216,7 +219,7 @@ export default function Editor() {
                   Properties
                 </TabsTrigger>
               </TabsList>
-              
+
               <TabsContent value="code" className="flex-1 m-0 overflow-hidden">
                 <CodeEditor
                   value={codeValue}
@@ -224,7 +227,7 @@ export default function Editor() {
                   error={codeError}
                 />
               </TabsContent>
-              
+
               <TabsContent value="table" className="flex-1 m-0 overflow-hidden">
                 <FeatureTable
                   features={geoData.features}
@@ -233,7 +236,7 @@ export default function Editor() {
                   onFeatureDelete={handleFeatureDelete}
                 />
               </TabsContent>
-              
+
               <TabsContent value="properties" className="flex-1 m-0 overflow-hidden">
                 <PropertyEditor
                   feature={selectedFeature}
