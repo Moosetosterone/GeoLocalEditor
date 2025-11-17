@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import type { GeoJSONFeature, GeoJSONFeatureCollection } from "@shared/schema";
+import { useState } from "react";
+import type { GeoJSONFeature } from "@shared/schema";
 import { MapCanvas } from "@/components/MapCanvas";
 import { CodeEditor } from "@/components/CodeEditor";
 import { DrawingToolbar } from "@/components/DrawingToolbar";
@@ -9,54 +9,33 @@ import { TopToolbar } from "@/components/TopToolbar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { ChevronRight, ChevronLeft } from "lucide-react";
-import { createEmptyFeatureCollection, validateGeoJSON, formatGeoJSON, csvToGeoJSON, geoJSONToCSV } from "@/lib/geojson-utils";
+import { formatGeoJSON, csvToGeoJSON, geoJSONToCSV } from "@/lib/geojson-utils";
 import { useToast } from "@/hooks/use-toast";
+import { useGeoData } from "@/hooks/useGeoData";
+import { Z_INDEX } from "@/lib/constants";
 
 export default function Editor() {
-  const [geoData, setGeoData] = useState<GeoJSONFeatureCollection>(createEmptyFeatureCollection);
-  const [codeValue, setCodeValue] = useState(formatGeoJSON(geoData));
-  const [codeError, setCodeError] = useState<string | null>(null);
-  const [selectedFeature, setSelectedFeature] = useState<GeoJSONFeature | null>(null);
+  // Use custom hook for GeoJSON state management
+  const {
+    geoData,
+    codeValue,
+    codeError,
+    selectedFeature,
+    setCodeValue,
+    setSelectedFeature,
+    addFeature,
+    removeFeature,
+    updateFeatureProperties,
+    replaceData,
+    reset
+  } = useGeoData();
+
   const [drawMode, setDrawMode] = useState<"none" | "point" | "line" | "polygon">("none");
   const [isPanelCollapsed, setIsPanelCollapsed] = useState(false);
   const { toast } = useToast();
 
-  useEffect(() => {
-    const stored = localStorage.getItem("geojson-data");
-    if (stored) {
-      try {
-        const parsed = JSON.parse(stored);
-        setGeoData(parsed);
-        setCodeValue(formatGeoJSON(parsed));
-      } catch (e) {
-        console.error("Failed to load stored data", e);
-      }
-    }
-  }, []);
-
-  useEffect(() => {
-    localStorage.setItem("geojson-data", JSON.stringify(geoData));
-  }, [geoData]);
-
-  const handleCodeChange = (value: string) => {
-    setCodeValue(value);
-    const result = validateGeoJSON(value);
-
-    if (result.valid && result.data) {
-      setCodeError(null);
-      setGeoData(result.data);
-    } else {
-      setCodeError(result.error || "Invalid GeoJSON");
-    }
-  };
-
   const handleFeatureAdd = (feature: GeoJSONFeature) => {
-    const newData = {
-      ...geoData,
-      features: [...geoData.features, feature]
-    };
-    setGeoData(newData);
-    setCodeValue(formatGeoJSON(newData));
+    addFeature(feature);
     setDrawMode("none");
     toast({
       title: "Feature added",
@@ -65,15 +44,7 @@ export default function Editor() {
   };
 
   const handleFeatureDelete = (feature: GeoJSONFeature) => {
-    const newData = {
-      ...geoData,
-      features: geoData.features.filter(f => f.id !== feature.id)
-    };
-    setGeoData(newData);
-    setCodeValue(formatGeoJSON(newData));
-    if (selectedFeature?.id === feature.id) {
-      setSelectedFeature(null);
-    }
+    removeFeature(feature);
     toast({
       title: "Feature deleted",
       description: "The feature has been removed from the map.",
@@ -82,23 +53,11 @@ export default function Editor() {
 
   const handlePropertyChange = (properties: Record<string, any>) => {
     if (!selectedFeature) return;
-
-    const newData = {
-      ...geoData,
-      features: geoData.features.map(f =>
-        f.id === selectedFeature.id ? { ...f, properties } : f
-      )
-    };
-    setGeoData(newData);
-    setCodeValue(formatGeoJSON(newData));
-    setSelectedFeature({ ...selectedFeature, properties });
+    updateFeatureProperties(selectedFeature.id!, properties);
   };
 
   const handleNew = () => {
-    const empty = createEmptyFeatureCollection();
-    setGeoData(empty);
-    setCodeValue(formatGeoJSON(empty));
-    setSelectedFeature(null);
+    reset();
     setDrawMode("none");
     toast({
       title: "New document",
@@ -111,17 +70,16 @@ export default function Editor() {
 
     if (file.name.endsWith('.csv')) {
       const data = csvToGeoJSON(text);
-      setGeoData(data);
-      setCodeValue(formatGeoJSON(data));
+      replaceData(data);
       toast({
         title: "CSV imported",
         description: `Imported ${data.features.length} features from CSV.`,
       });
     } else {
+      const { validateGeoJSON } = await import("@/lib/geojson-utils");
       const result = validateGeoJSON(text);
       if (result.valid && result.data) {
-        setGeoData(result.data);
-        setCodeValue(formatGeoJSON(result.data));
+        replaceData(result.data);
         toast({
           title: "GeoJSON imported",
           description: `Imported ${result.data.features.length} features.`,
@@ -178,8 +136,9 @@ export default function Editor() {
         onClear={handleClear}
       />
 
-      <div className="flex flex-1 overflow-hidden">
-        <div className={`relative transition-all duration-300 ${isPanelCollapsed ? 'w-full' : 'flex-1'}`}>
+      <div className="flex flex-1 overflow-hidden relative">
+        {/* Map Container - expands to full width when panel is collapsed */}
+        <div className={`relative transition-all duration-300 ${isPanelCollapsed ? 'w-full' : 'w-1/2'}`}>
           <div className="absolute top-4 left-4 z-[1000]">
             <DrawingToolbar activeTool={drawMode} onToolChange={setDrawMode} />
           </div>
@@ -189,21 +148,38 @@ export default function Editor() {
             onFeatureSelect={setSelectedFeature}
             selectedFeature={selectedFeature}
             drawMode={drawMode}
+            isExpanded={isPanelCollapsed}
           />
         </div>
 
-        <div className={`relative flex flex-col transition-all duration-300 ${isPanelCollapsed ? 'w-0' : 'flex-1'}`}>
-          <Button
-            size="icon"
-            variant="ghost"
-            className="absolute -left-8 top-1/2 -translate-y-1/2 z-[1001] w-8 h-16 rounded-r-none"
-            onClick={() => setIsPanelCollapsed(!isPanelCollapsed)}
-            data-testid="button-toggle-panel"
-          >
-            {isPanelCollapsed ? <ChevronLeft className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-          </Button>
+        {/* Toggle Button - ALWAYS VISIBLE with high contrast */}
+        <button
+          onClick={() => setIsPanelCollapsed(!isPanelCollapsed)}
+          className="absolute top-1/2 -translate-y-1/2 w-6 h-20 flex items-center justify-center bg-blue-600 hover:bg-blue-700 text-white shadow-xl rounded-l-lg transition-all duration-300 cursor-pointer border-2 border-blue-700"
+          style={{ 
+            zIndex: Z_INDEX.TOGGLE_BUTTON,
+            right: isPanelCollapsed ? '0px' : 'calc(50% - 3px)',
+          }}
+          data-testid="button-toggle-panel"
+          aria-label={isPanelCollapsed ? "Expand panel" : "Collapse panel"}
+        >
+          {isPanelCollapsed ? (
+            <ChevronLeft className="w-5 h-5" />
+          ) : (
+            <ChevronRight className="w-5 h-5" />
+          )}
+        </button>
 
-          <div className={`flex-1 flex flex-col ${isPanelCollapsed ? 'invisible' : ''}`}>
+        {/* Right Panel - Hidden when collapsed */}
+        <div 
+          className={`flex flex-col bg-background transition-all duration-300 ${
+            isPanelCollapsed ? 'w-0 opacity-0' : 'w-1/2 opacity-100'
+          }`}
+          style={{
+            overflow: isPanelCollapsed ? 'hidden' : 'visible'
+          }}
+        >
+          {!isPanelCollapsed && (
             <Tabs defaultValue="code" className="flex-1 flex flex-col">
               <TabsList className="w-full justify-start rounded-none border-b h-10 bg-background">
                 <TabsTrigger value="code" className="data-[state=active]:bg-accent" data-testid="tab-code">
@@ -220,7 +196,7 @@ export default function Editor() {
               <TabsContent value="code" className="flex-1 m-0 overflow-hidden">
                 <CodeEditor
                   value={codeValue}
-                  onChange={handleCodeChange}
+                  onChange={setCodeValue}
                   error={codeError}
                 />
               </TabsContent>
@@ -241,7 +217,7 @@ export default function Editor() {
                 />
               </TabsContent>
             </Tabs>
-          </div>
+          )}
         </div>
       </div>
     </div>

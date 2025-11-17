@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { GeoJSONFeature, GeoJSONFeatureCollection } from "@shared/schema";
 import { Button } from "@/components/ui/button";
 import { ZoomIn, ZoomOut, Maximize2 } from "lucide-react";
+import { MAP_COLORS, MAP_DEFAULTS, DRAWING_CONFIG, Z_INDEX } from "@/lib/constants";
 
 declare global {
   interface Window {
@@ -15,6 +16,7 @@ interface MapCanvasProps {
   onFeatureSelect?: (feature: GeoJSONFeature | null) => void;
   selectedFeature?: GeoJSONFeature | null;
   drawMode?: "none" | "point" | "line" | "polygon";
+  isExpanded?: boolean; // NEW: Signal from parent when layout changes
 }
 
 type BaseMap = "standard" | "satellite" | "light" | "dark" | "terrain";
@@ -47,7 +49,7 @@ const baseMaps = {
   }
 };
 
-export function MapCanvas({ data, onFeatureAdd, onFeatureSelect, selectedFeature, drawMode = "none" }: MapCanvasProps) {
+export function MapCanvas({ data, onFeatureAdd, onFeatureSelect, selectedFeature, drawMode = "none", isExpanded }: MapCanvasProps) {
   const mapRef = useRef<any>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const layersRef = useRef<any[]>([]);
@@ -56,26 +58,31 @@ export function MapCanvas({ data, onFeatureAdd, onFeatureSelect, selectedFeature
   const tileLayerRef = useRef<any>(null);
   const [baseMap, setBaseMap] = useState<BaseMap>("standard");
 
+  // Initialize Leaflet map with proper cleanup
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
+
+    let mounted = true;
+    let map: any = null;
 
     const script = document.createElement('script');
     script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
     script.integrity = 'sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=';
     script.crossOrigin = '';
-    
+
     script.onload = () => {
-      if (!containerRef.current || !window.L) return;
+      // Check if component is still mounted and Leaflet loaded
+      if (!mounted || !containerRef.current || !window.L) return;
 
       const L = window.L;
-      
-      const map = L.map(containerRef.current, {
+
+      map = L.map(containerRef.current, {
         zoomControl: false,
-      }).setView([20, 0], 2);
+      }).setView(MAP_DEFAULTS.CENTER, MAP_DEFAULTS.ZOOM);
 
       const tileLayer = L.tileLayer(baseMaps.standard.url, {
         attribution: baseMaps.standard.attribution,
-        maxZoom: 19,
+        maxZoom: MAP_DEFAULTS.MAX_ZOOM,
       }).addTo(map);
 
       tileLayerRef.current = tileLayer;
@@ -92,24 +99,24 @@ export function MapCanvas({ data, onFeatureAdd, onFeatureSelect, selectedFeature
           onFeatureAdd?.(feature);
         } else if (drawMode === 'line' || drawMode === 'polygon') {
           currentDrawingRef.current.push([e.latlng.lng, e.latlng.lat]);
-          
+
           if (drawingLayerRef.current) {
             map.removeLayer(drawingLayerRef.current);
           }
 
           if (currentDrawingRef.current.length === 1) {
             drawingLayerRef.current = L.circleMarker([e.latlng.lat, e.latlng.lng], {
-              radius: 5,
-              color: '#10b981',
-              fillColor: '#10b981',
+              radius: DRAWING_CONFIG.POINT_RADIUS,
+              color: MAP_COLORS.DRAWING,
+              fillColor: MAP_COLORS.DRAWING,
               fillOpacity: 1
             }).addTo(map);
           } else {
             const latLngs = currentDrawingRef.current.map(coord => [coord[1], coord[0]]);
             drawingLayerRef.current = L.polyline(latLngs, {
-              color: '#10b981',
-              weight: 2,
-              dashArray: '5, 5'
+              color: MAP_COLORS.DRAWING,
+              weight: DRAWING_CONFIG.LINE_WEIGHT,
+              dashArray: DRAWING_CONFIG.DASH_ARRAY
             }).addTo(map);
           }
         }
@@ -146,13 +153,50 @@ export function MapCanvas({ data, onFeatureAdd, onFeatureSelect, selectedFeature
       });
     };
 
+    script.onerror = () => {
+      console.error('Failed to load Leaflet library');
+    };
+
     document.head.appendChild(script);
 
     return () => {
-      if (mapRef.current) {
-        mapRef.current.remove();
-        mapRef.current = null;
+      mounted = false;
+      if (map) {
+        map.remove();
+        map = null;
       }
+      mapRef.current = null;
+    };
+  }, []);
+
+  // ⭐ IMPROVED: Resize when isExpanded prop changes (from parent)
+  useEffect(() => {
+    if (!mapRef.current) return;
+
+    // Wait for CSS transition to complete
+    const timeoutId = setTimeout(() => {
+      if (mapRef.current) {
+        mapRef.current.invalidateSize();
+      }
+    }, 350);
+
+    return () => clearTimeout(timeoutId);
+  }, [isExpanded]); // Trigger when parent tells us layout changed
+
+  // ⭐ ALSO: Use ResizeObserver as backup
+  useEffect(() => {
+    if (!containerRef.current || !mapRef.current) return;
+
+    const resizeObserver = new ResizeObserver(() => {
+      if (mapRef.current) {
+        mapRef.current.invalidateSize();
+      }
+    });
+
+    resizeObserver.observe(containerRef.current);
+
+    return () => {
+      resizeObserver.disconnect();
     };
   }, []);
 
@@ -172,27 +216,27 @@ export function MapCanvas({ data, onFeatureAdd, onFeatureSelect, selectedFeature
       if (feature.geometry.type === "Point") {
         const [lon, lat] = feature.geometry.coordinates;
         layer = L.circleMarker([lat, lon], {
-          radius: isSelected ? 8 : 6,
-          color: isSelected ? '#ef4444' : '#3b82f6',
-          fillColor: isSelected ? '#ef4444' : '#3b82f6',
+          radius: isSelected ? DRAWING_CONFIG.POINT_RADIUS_SELECTED : DRAWING_CONFIG.POINT_RADIUS,
+          color: isSelected ? MAP_COLORS.FEATURE_SELECTED : MAP_COLORS.FEATURE_DEFAULT,
+          fillColor: isSelected ? MAP_COLORS.FEATURE_SELECTED : MAP_COLORS.FEATURE_DEFAULT,
           fillOpacity: 1,
           weight: isSelected ? 2 : 1
         });
       } else if (feature.geometry.type === "LineString") {
         const coords = feature.geometry.coordinates.map((coord: number[]) => [coord[1], coord[0]]);
         layer = L.polyline(coords, {
-          color: isSelected ? '#ef4444' : '#3b82f6',
-          weight: isSelected ? 3 : 2
+          color: isSelected ? MAP_COLORS.FEATURE_SELECTED : MAP_COLORS.FEATURE_DEFAULT,
+          weight: isSelected ? DRAWING_CONFIG.LINE_WEIGHT_SELECTED : DRAWING_CONFIG.LINE_WEIGHT
         });
       } else if (feature.geometry.type === "Polygon") {
-        const rings = feature.geometry.coordinates.map((ring: number[][]) => 
+        const rings = feature.geometry.coordinates.map((ring: number[][]) =>
           ring.map((coord: number[]) => [coord[1], coord[0]])
         );
         layer = L.polygon(rings, {
-          color: isSelected ? '#ef4444' : '#3b82f6',
-          fillColor: isSelected ? '#ef4444' : '#3b82f6',
-          fillOpacity: 0.2,
-          weight: isSelected ? 3 : 2
+          color: isSelected ? MAP_COLORS.FEATURE_SELECTED : MAP_COLORS.FEATURE_DEFAULT,
+          fillColor: isSelected ? MAP_COLORS.FEATURE_SELECTED : MAP_COLORS.FEATURE_DEFAULT,
+          fillOpacity: DRAWING_CONFIG.POLYGON_FILL_OPACITY,
+          weight: isSelected ? DRAWING_CONFIG.LINE_WEIGHT_SELECTED : DRAWING_CONFIG.LINE_WEIGHT
         });
       }
 
@@ -209,7 +253,7 @@ export function MapCanvas({ data, onFeatureAdd, onFeatureSelect, selectedFeature
 
   useEffect(() => {
     if (!mapRef.current) return;
-    
+
     const map = mapRef.current;
     if (drawMode === 'none') {
       currentDrawingRef.current = [];
@@ -234,24 +278,24 @@ export function MapCanvas({ data, onFeatureAdd, onFeatureSelect, selectedFeature
 
   const handleResetView = () => {
     if (mapRef.current) {
-      mapRef.current.setView([20, 0], 2);
+      mapRef.current.setView(MAP_DEFAULTS.CENTER, MAP_DEFAULTS.ZOOM);
     }
   };
 
   const handleBaseMapChange = (newBaseMap: BaseMap) => {
     if (!mapRef.current || !tileLayerRef.current || !window.L) return;
-    
+
     const L = window.L;
     const map = mapRef.current;
-    
+
     map.removeLayer(tileLayerRef.current);
-    
+
     const baseMapConfig = baseMaps[newBaseMap];
     const newTileLayer = L.tileLayer(baseMapConfig.url, {
       attribution: baseMapConfig.attribution,
-      maxZoom: 19,
+      maxZoom: MAP_DEFAULTS.MAX_ZOOM,
     }).addTo(map);
-    
+
     tileLayerRef.current = newTileLayer;
     setBaseMap(newBaseMap);
   };
@@ -259,8 +303,8 @@ export function MapCanvas({ data, onFeatureAdd, onFeatureSelect, selectedFeature
   return (
     <div className="relative w-full h-full">
       <div ref={containerRef} className="w-full h-full" data-testid="map-canvas" />
-      
-      <div className="absolute bottom-4 left-4 flex gap-1 z-[1000]">
+
+      <div className="absolute bottom-4 left-4 flex gap-1" style={{ zIndex: Z_INDEX.MAP_CONTROLS }}>
         {(Object.keys(baseMaps) as BaseMap[]).map((key) => (
           <Button
             key={key}
@@ -275,7 +319,7 @@ export function MapCanvas({ data, onFeatureAdd, onFeatureSelect, selectedFeature
         ))}
       </div>
 
-      <div className="absolute bottom-4 right-4 flex flex-col gap-1 z-[1000]">
+      <div className="absolute bottom-4 right-4 flex flex-col gap-1" style={{ zIndex: Z_INDEX.MAP_CONTROLS }}>
         <Button
           size="icon"
           variant="secondary"
@@ -301,9 +345,9 @@ export function MapCanvas({ data, onFeatureAdd, onFeatureSelect, selectedFeature
           <Maximize2 className="w-4 h-4" />
         </Button>
       </div>
-      
+
       {drawMode !== "none" && (
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-primary text-primary-foreground px-4 py-2 rounded-md text-sm font-medium z-[1000]">
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-primary text-primary-foreground px-4 py-2 rounded-md text-sm font-medium" style={{ zIndex: Z_INDEX.DRAWING_HINT }}>
           {drawMode === "point" && "Click to add a point"}
           {drawMode === "line" && "Click to add points, double-click to finish"}
           {drawMode === "polygon" && "Click to add vertices, double-click to finish"}
