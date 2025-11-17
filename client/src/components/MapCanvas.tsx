@@ -82,6 +82,9 @@ export function MapCanvas({ data, onFeatureAdd, onFeatureSelect, selectedFeature
   const tileLayerRef = useRef<any>(null);
   const [baseMap, setBaseMap] = useState<BaseMap>("standard");
 
+  // ⭐ NEW: State for coordinate display
+  const [cursorCoords, setCursorCoords] = useState<{lat: number, lon: number} | null>(null);
+
   // ⭐ NEW: State for measurement display
   const [measurementInfo, setMeasurementInfo] = useState<{
     distance: number;
@@ -99,6 +102,90 @@ export function MapCanvas({ data, onFeatureAdd, onFeatureSelect, selectedFeature
   useEffect(() => {
     onFeatureAddRef.current = onFeatureAdd;
   }, [onFeatureAdd]);
+
+  // ⭐ NEW: Keyboard handler for backspace while drawing
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Backspace: Undo last point while drawing
+      if (e.key === 'Backspace' && 
+          (drawModeRef.current === 'line' || drawModeRef.current === 'polygon') && 
+          currentDrawingRef.current.length > 0) {
+        e.preventDefault(); // Prevent browser back navigation
+
+        // Remove last point
+        currentDrawingRef.current.pop();
+
+        // Update drawing layer
+        if (mapRef.current && window.L) {
+          const L = window.L;
+          const map = mapRef.current;
+
+          if (drawingLayerRef.current) {
+            map.removeLayer(drawingLayerRef.current);
+          }
+
+          if (currentDrawingRef.current.length === 0) {
+            drawingLayerRef.current = null;
+          } else if (currentDrawingRef.current.length === 1) {
+            const point = currentDrawingRef.current[0];
+            drawingLayerRef.current = L.circleMarker([point[1], point[0]], {
+              radius: DRAWING_CONFIG.POINT_RADIUS,
+              color: MAP_COLORS.DRAWING,
+              fillColor: MAP_COLORS.DRAWING,
+              fillOpacity: 1
+            }).addTo(map);
+          } else {
+            const latLngs = currentDrawingRef.current.map(coord => [coord[1], coord[0]]);
+            drawingLayerRef.current = L.polyline(latLngs, {
+              color: MAP_COLORS.DRAWING,
+              weight: DRAWING_CONFIG.LINE_WEIGHT,
+              dashArray: DRAWING_CONFIG.DASH_ARRAY
+            }).addTo(map);
+          }
+        }
+      }
+
+      // Enter: Finish drawing (alternative to double-click)
+      if (e.key === 'Enter' && 
+          (drawModeRef.current === 'line' || drawModeRef.current === 'polygon') && 
+          currentDrawingRef.current.length >= 2) {
+        const currentOnFeatureAdd = onFeatureAddRef.current;
+
+        if (drawModeRef.current === 'line') {
+          const feature: GeoJSONFeature = {
+            type: "Feature",
+            geometry: { type: "LineString", coordinates: currentDrawingRef.current },
+            properties: {},
+            id: Date.now()
+          };
+          currentOnFeatureAdd?.(feature);
+        } else if (drawModeRef.current === 'polygon' && currentDrawingRef.current.length >= 3) {
+          const feature: GeoJSONFeature = {
+            type: "Feature",
+            geometry: { type: "Polygon", coordinates: [[...currentDrawingRef.current, currentDrawingRef.current[0]]] },
+            properties: {},
+            id: Date.now()
+          };
+          currentOnFeatureAdd?.(feature);
+        }
+
+        // Cleanup
+        currentDrawingRef.current = [];
+        if (mapRef.current && drawingLayerRef.current) {
+          mapRef.current.removeLayer(drawingLayerRef.current);
+          drawingLayerRef.current = null;
+        }
+        if (previewLineRef.current && mapRef.current) {
+          mapRef.current.removeLayer(previewLineRef.current);
+          previewLineRef.current = null;
+        }
+        setMeasurementInfo(null);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   // Initialize Leaflet map with proper cleanup
   useEffect(() => {
@@ -119,7 +206,7 @@ export function MapCanvas({ data, onFeatureAdd, onFeatureSelect, selectedFeature
 
       map = L.map(containerRef.current, {
         zoomControl: false,
-        doubleClickZoom: false,
+        doubleClickZoom: true, // ⭐ Enable by default (for pan mode)
       }).setView(MAP_DEFAULTS.CENTER, MAP_DEFAULTS.ZOOM);
 
       const tileLayer = L.tileLayer(baseMaps.standard.url, {
@@ -133,6 +220,9 @@ export function MapCanvas({ data, onFeatureAdd, onFeatureSelect, selectedFeature
       // ⭐ NEW: Mouse move handler for preview line and measurements
       map.on('mousemove', (e: any) => {
         const currentDrawMode = drawModeRef.current;
+
+        // Always update cursor coordinates
+        setCursorCoords({ lat: e.latlng.lat, lon: e.latlng.lng });
 
         if ((currentDrawMode === 'line' || currentDrawMode === 'polygon') && 
             currentDrawingRef.current.length > 0) {
@@ -356,8 +446,16 @@ export function MapCanvas({ data, onFeatureAdd, onFeatureSelect, selectedFeature
 
       if (layer) {
         layer.on('click', (e: any) => {
-          L.DomEvent.stopPropagation(e);
-          onFeatureSelect?.(feature);
+          const currentDrawMode = drawModeRef.current;
+
+          // Only select feature if we're not in an active drawing mode
+          if (currentDrawMode === 'none') {
+            L.DomEvent.stopPropagation(e);
+            onFeatureSelect?.(feature);
+          } else {
+            // In drawing mode: let click pass through to map
+            // Don't stopPropagation so drawing can happen on top of features
+          }
         });
         layer.addTo(map);
         layersRef.current.push(layer);
@@ -399,6 +497,21 @@ export function MapCanvas({ data, onFeatureAdd, onFeatureSelect, selectedFeature
     return () => {
       container.style.cursor = '';
     };
+  }, [drawMode]);
+
+  // ⭐ NEW: Toggle double-click zoom based on draw mode
+  useEffect(() => {
+    if (!mapRef.current) return;
+
+    const map = mapRef.current;
+
+    if (drawMode === 'none') {
+      // Pan mode: enable double-click zoom
+      map.doubleClickZoom.enable();
+    } else {
+      // Drawing mode: disable double-click zoom (used for finishing drawings)
+      map.doubleClickZoom.disable();
+    }
   }, [drawMode]);
 
   const handleZoomIn = () => {
@@ -455,6 +568,21 @@ export function MapCanvas({ data, onFeatureAdd, onFeatureSelect, selectedFeature
           </Button>
         ))}
       </div>
+
+      {/* ⭐ NEW: Coordinate display */}
+      {cursorCoords && (
+        <div 
+          className="absolute bottom-14 left-4 bg-white/90 dark:bg-black/90 px-3 py-1.5 rounded shadow-md text-xs font-mono"
+          style={{ zIndex: Z_INDEX.MAP_CONTROLS }}
+        >
+          <div className="flex gap-2">
+            <span className="text-muted-foreground">Lat:</span>
+            <span className="font-semibold">{cursorCoords.lat.toFixed(6)}°</span>
+            <span className="text-muted-foreground">Lon:</span>
+            <span className="font-semibold">{cursorCoords.lon.toFixed(6)}°</span>
+          </div>
+        </div>
+      )}
 
       <div className="absolute bottom-4 right-4 flex flex-col gap-1" style={{ zIndex: Z_INDEX.MAP_CONTROLS }}>
         <Button
