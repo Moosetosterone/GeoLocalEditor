@@ -16,7 +16,7 @@ interface MapCanvasProps {
   onFeatureSelect?: (feature: GeoJSONFeature | null) => void;
   selectedFeature?: GeoJSONFeature | null;
   drawMode?: "none" | "point" | "line" | "polygon";
-  isExpanded?: boolean; // NEW: Signal from parent when layout changes
+  isExpanded?: boolean;
 }
 
 type BaseMap = "standard" | "satellite" | "light" | "dark" | "terrain";
@@ -58,6 +58,20 @@ export function MapCanvas({ data, onFeatureAdd, onFeatureSelect, selectedFeature
   const tileLayerRef = useRef<any>(null);
   const [baseMap, setBaseMap] = useState<BaseMap>("standard");
 
+  // ⭐ NEW: Use refs to store latest values for event handlers
+  const drawModeRef = useRef(drawMode);
+  const onFeatureAddRef = useRef(onFeatureAdd);
+  const clickTimerRef = useRef<NodeJS.Timeout | null>(null); // ⭐ Track click timing
+
+  // ⭐ NEW: Keep refs updated with latest values
+  useEffect(() => {
+    drawModeRef.current = drawMode;
+  }, [drawMode]);
+
+  useEffect(() => {
+    onFeatureAddRef.current = onFeatureAdd;
+  }, [onFeatureAdd]);
+
   // Initialize Leaflet map with proper cleanup
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
@@ -71,13 +85,13 @@ export function MapCanvas({ data, onFeatureAdd, onFeatureSelect, selectedFeature
     script.crossOrigin = '';
 
     script.onload = () => {
-      // Check if component is still mounted and Leaflet loaded
       if (!mounted || !containerRef.current || !window.L) return;
 
       const L = window.L;
 
       map = L.map(containerRef.current, {
         zoomControl: false,
+        doubleClickZoom: false, // ⭐ Disable double-click zoom so we can use it for drawing
       }).setView(MAP_DEFAULTS.CENTER, MAP_DEFAULTS.ZOOM);
 
       const tileLayer = L.tileLayer(baseMaps.standard.url, {
@@ -88,62 +102,85 @@ export function MapCanvas({ data, onFeatureAdd, onFeatureSelect, selectedFeature
       tileLayerRef.current = tileLayer;
       mapRef.current = map;
 
+      // ⭐ FIXED: Use refs in event handlers to get current values
       map.on('click', (e: any) => {
-        if (drawMode === 'point') {
+        const currentDrawMode = drawModeRef.current;
+        const currentOnFeatureAdd = onFeatureAddRef.current;
+
+        // ⭐ For line/polygon, delay processing to detect double-click
+        if (currentDrawMode === 'line' || currentDrawMode === 'polygon') {
+          // Clear any existing timer
+          if (clickTimerRef.current) {
+            clearTimeout(clickTimerRef.current);
+          }
+
+          // Wait a bit to see if it's a double-click
+          clickTimerRef.current = setTimeout(() => {
+            currentDrawingRef.current.push([e.latlng.lng, e.latlng.lat]);
+
+            if (drawingLayerRef.current) {
+              map.removeLayer(drawingLayerRef.current);
+            }
+
+            if (currentDrawingRef.current.length === 1) {
+              drawingLayerRef.current = L.circleMarker([e.latlng.lat, e.latlng.lng], {
+                radius: DRAWING_CONFIG.POINT_RADIUS,
+                color: MAP_COLORS.DRAWING,
+                fillColor: MAP_COLORS.DRAWING,
+                fillOpacity: 1
+              }).addTo(map);
+            } else {
+              const latLngs = currentDrawingRef.current.map(coord => [coord[1], coord[0]]);
+              drawingLayerRef.current = L.polyline(latLngs, {
+                color: MAP_COLORS.DRAWING,
+                weight: DRAWING_CONFIG.LINE_WEIGHT,
+                dashArray: DRAWING_CONFIG.DASH_ARRAY
+              }).addTo(map);
+            }
+          }, 250); // 250ms delay to detect double-click
+        } else if (currentDrawMode === 'point') {
+          // Point mode: add immediately (no double-click needed)
           const feature: GeoJSONFeature = {
             type: "Feature",
             geometry: { type: "Point", coordinates: [e.latlng.lng, e.latlng.lat] },
             properties: {},
             id: Date.now()
           };
-          onFeatureAdd?.(feature);
-        } else if (drawMode === 'line' || drawMode === 'polygon') {
-          currentDrawingRef.current.push([e.latlng.lng, e.latlng.lat]);
-
-          if (drawingLayerRef.current) {
-            map.removeLayer(drawingLayerRef.current);
-          }
-
-          if (currentDrawingRef.current.length === 1) {
-            drawingLayerRef.current = L.circleMarker([e.latlng.lat, e.latlng.lng], {
-              radius: DRAWING_CONFIG.POINT_RADIUS,
-              color: MAP_COLORS.DRAWING,
-              fillColor: MAP_COLORS.DRAWING,
-              fillOpacity: 1
-            }).addTo(map);
-          } else {
-            const latLngs = currentDrawingRef.current.map(coord => [coord[1], coord[0]]);
-            drawingLayerRef.current = L.polyline(latLngs, {
-              color: MAP_COLORS.DRAWING,
-              weight: DRAWING_CONFIG.LINE_WEIGHT,
-              dashArray: DRAWING_CONFIG.DASH_ARRAY
-            }).addTo(map);
-          }
+          currentOnFeatureAdd?.(feature);
         }
       });
 
-      map.on('dblclick', () => {
-        if (drawMode === 'line' && currentDrawingRef.current.length >= 2) {
+      map.on('dblclick', (e: any) => {
+        const currentDrawMode = drawModeRef.current;
+        const currentOnFeatureAdd = onFeatureAddRef.current;
+
+        // ⭐ Cancel any pending click timer
+        if (clickTimerRef.current) {
+          clearTimeout(clickTimerRef.current);
+          clickTimerRef.current = null;
+        }
+
+        if (currentDrawMode === 'line' && currentDrawingRef.current.length >= 2) {
           const feature: GeoJSONFeature = {
             type: "Feature",
             geometry: { type: "LineString", coordinates: currentDrawingRef.current },
             properties: {},
             id: Date.now()
           };
-          onFeatureAdd?.(feature);
+          currentOnFeatureAdd?.(feature);
           currentDrawingRef.current = [];
           if (drawingLayerRef.current) {
             map.removeLayer(drawingLayerRef.current);
             drawingLayerRef.current = null;
           }
-        } else if (drawMode === 'polygon' && currentDrawingRef.current.length >= 3) {
+        } else if (currentDrawMode === 'polygon' && currentDrawingRef.current.length >= 3) {
           const feature: GeoJSONFeature = {
             type: "Feature",
             geometry: { type: "Polygon", coordinates: [[...currentDrawingRef.current, currentDrawingRef.current[0]]] },
             properties: {},
             id: Date.now()
           };
-          onFeatureAdd?.(feature);
+          currentOnFeatureAdd?.(feature);
           currentDrawingRef.current = [];
           if (drawingLayerRef.current) {
             map.removeLayer(drawingLayerRef.current);
@@ -167,13 +204,12 @@ export function MapCanvas({ data, onFeatureAdd, onFeatureSelect, selectedFeature
       }
       mapRef.current = null;
     };
-  }, []);
+  }, []); // Only run once on mount
 
-  // ⭐ IMPROVED: Resize when isExpanded prop changes (from parent)
+  // Resize when isExpanded prop changes
   useEffect(() => {
     if (!mapRef.current) return;
 
-    // Wait for CSS transition to complete
     const timeoutId = setTimeout(() => {
       if (mapRef.current) {
         mapRef.current.invalidateSize();
@@ -181,9 +217,9 @@ export function MapCanvas({ data, onFeatureAdd, onFeatureSelect, selectedFeature
     }, 350);
 
     return () => clearTimeout(timeoutId);
-  }, [isExpanded]); // Trigger when parent tells us layout changed
+  }, [isExpanded]);
 
-  // ⭐ ALSO: Use ResizeObserver as backup
+  // ResizeObserver as backup
   useEffect(() => {
     if (!containerRef.current || !mapRef.current) return;
 
@@ -200,6 +236,7 @@ export function MapCanvas({ data, onFeatureAdd, onFeatureSelect, selectedFeature
     };
   }, []);
 
+  // Render features
   useEffect(() => {
     if (!mapRef.current || !window.L) return;
 
@@ -251,6 +288,7 @@ export function MapCanvas({ data, onFeatureAdd, onFeatureSelect, selectedFeature
     });
   }, [data, selectedFeature, onFeatureSelect]);
 
+  // Clear drawing when drawMode changes to none
   useEffect(() => {
     if (!mapRef.current) return;
 
@@ -262,6 +300,23 @@ export function MapCanvas({ data, onFeatureAdd, onFeatureSelect, selectedFeature
         drawingLayerRef.current = null;
       }
     }
+  }, [drawMode]);
+
+  // ⭐ NEW: Change cursor based on draw mode
+  useEffect(() => {
+    if (!containerRef.current) return;
+
+    const container = containerRef.current;
+
+    if (drawMode === 'point' || drawMode === 'line' || drawMode === 'polygon') {
+      container.style.cursor = 'crosshair';
+    } else {
+      container.style.cursor = '';
+    }
+
+    return () => {
+      container.style.cursor = '';
+    };
   }, [drawMode]);
 
   const handleZoomIn = () => {
