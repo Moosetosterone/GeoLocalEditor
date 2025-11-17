@@ -49,21 +49,49 @@ const baseMaps = {
   }
 };
 
+// ⭐ NEW: Haversine formula to calculate distance in nautical miles
+function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 3440.065; // Earth's radius in nautical miles
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = 
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+// ⭐ NEW: Calculate bearing/heading between two points
+function calculateBearing(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const y = Math.sin(dLon) * Math.cos(lat2 * Math.PI / 180);
+  const x = Math.cos(lat1 * Math.PI / 180) * Math.sin(lat2 * Math.PI / 180) -
+            Math.sin(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.cos(dLon);
+  let bearing = Math.atan2(y, x) * 180 / Math.PI;
+  return (bearing + 360) % 360; // Normalize to 0-360
+}
+
 export function MapCanvas({ data, onFeatureAdd, onFeatureSelect, selectedFeature, drawMode = "none", isExpanded }: MapCanvasProps) {
   const mapRef = useRef<any>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const layersRef = useRef<any[]>([]);
   const drawingLayerRef = useRef<any>(null);
+  const previewLineRef = useRef<any>(null); // ⭐ NEW: Preview line while mouse moves
   const currentDrawingRef = useRef<number[][]>([]);
   const tileLayerRef = useRef<any>(null);
   const [baseMap, setBaseMap] = useState<BaseMap>("standard");
 
-  // ⭐ NEW: Use refs to store latest values for event handlers
+  // ⭐ NEW: State for measurement display
+  const [measurementInfo, setMeasurementInfo] = useState<{
+    distance: number;
+    heading: number;
+  } | null>(null);
+
   const drawModeRef = useRef(drawMode);
   const onFeatureAddRef = useRef(onFeatureAdd);
-  const clickTimerRef = useRef<NodeJS.Timeout | null>(null); // ⭐ Track click timing
+  const clickTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // ⭐ NEW: Keep refs updated with latest values
   useEffect(() => {
     drawModeRef.current = drawMode;
   }, [drawMode]);
@@ -91,7 +119,7 @@ export function MapCanvas({ data, onFeatureAdd, onFeatureSelect, selectedFeature
 
       map = L.map(containerRef.current, {
         zoomControl: false,
-        doubleClickZoom: false, // ⭐ Disable double-click zoom so we can use it for drawing
+        doubleClickZoom: false,
       }).setView(MAP_DEFAULTS.CENTER, MAP_DEFAULTS.ZOOM);
 
       const tileLayer = L.tileLayer(baseMaps.standard.url, {
@@ -102,21 +130,63 @@ export function MapCanvas({ data, onFeatureAdd, onFeatureSelect, selectedFeature
       tileLayerRef.current = tileLayer;
       mapRef.current = map;
 
-      // ⭐ FIXED: Use refs in event handlers to get current values
+      // ⭐ NEW: Mouse move handler for preview line and measurements
+      map.on('mousemove', (e: any) => {
+        const currentDrawMode = drawModeRef.current;
+
+        if ((currentDrawMode === 'line' || currentDrawMode === 'polygon') && 
+            currentDrawingRef.current.length > 0) {
+
+          // Get last point
+          const lastPoint = currentDrawingRef.current[currentDrawingRef.current.length - 1];
+          const [lastLon, lastLat] = lastPoint;
+
+          // Calculate distance and bearing to cursor
+          const distance = calculateDistance(lastLat, lastLon, e.latlng.lat, e.latlng.lng);
+          const bearing = calculateBearing(lastLat, lastLon, e.latlng.lat, e.latlng.lng);
+
+          setMeasurementInfo({
+            distance,
+            heading: bearing
+          });
+
+          // Remove old preview line
+          if (previewLineRef.current) {
+            map.removeLayer(previewLineRef.current);
+          }
+
+          // Draw preview line from last point to cursor
+          const previewCoords = [
+            ...currentDrawingRef.current.map(coord => [coord[1], coord[0]]),
+            [e.latlng.lat, e.latlng.lng]
+          ];
+
+          previewLineRef.current = L.polyline(previewCoords, {
+            color: MAP_COLORS.DRAWING,
+            weight: DRAWING_CONFIG.LINE_WEIGHT,
+            dashArray: DRAWING_CONFIG.DASH_ARRAY,
+            opacity: 0.7
+          }).addTo(map);
+        }
+      });
+
       map.on('click', (e: any) => {
         const currentDrawMode = drawModeRef.current;
         const currentOnFeatureAdd = onFeatureAddRef.current;
 
-        // ⭐ For line/polygon, delay processing to detect double-click
         if (currentDrawMode === 'line' || currentDrawMode === 'polygon') {
-          // Clear any existing timer
           if (clickTimerRef.current) {
             clearTimeout(clickTimerRef.current);
           }
 
-          // Wait a bit to see if it's a double-click
           clickTimerRef.current = setTimeout(() => {
             currentDrawingRef.current.push([e.latlng.lng, e.latlng.lat]);
+
+            // Clear preview line
+            if (previewLineRef.current) {
+              map.removeLayer(previewLineRef.current);
+              previewLineRef.current = null;
+            }
 
             if (drawingLayerRef.current) {
               map.removeLayer(drawingLayerRef.current);
@@ -137,9 +207,8 @@ export function MapCanvas({ data, onFeatureAdd, onFeatureSelect, selectedFeature
                 dashArray: DRAWING_CONFIG.DASH_ARRAY
               }).addTo(map);
             }
-          }, 250); // 250ms delay to detect double-click
+          }, 250);
         } else if (currentDrawMode === 'point') {
-          // Point mode: add immediately (no double-click needed)
           const feature: GeoJSONFeature = {
             type: "Feature",
             geometry: { type: "Point", coordinates: [e.latlng.lng, e.latlng.lat] },
@@ -154,11 +223,19 @@ export function MapCanvas({ data, onFeatureAdd, onFeatureSelect, selectedFeature
         const currentDrawMode = drawModeRef.current;
         const currentOnFeatureAdd = onFeatureAddRef.current;
 
-        // ⭐ Cancel any pending click timer
         if (clickTimerRef.current) {
           clearTimeout(clickTimerRef.current);
           clickTimerRef.current = null;
         }
+
+        // Clear preview line
+        if (previewLineRef.current) {
+          map.removeLayer(previewLineRef.current);
+          previewLineRef.current = null;
+        }
+
+        // Clear measurement info
+        setMeasurementInfo(null);
 
         if (currentDrawMode === 'line' && currentDrawingRef.current.length >= 2) {
           const feature: GeoJSONFeature = {
@@ -204,7 +281,7 @@ export function MapCanvas({ data, onFeatureAdd, onFeatureSelect, selectedFeature
       }
       mapRef.current = null;
     };
-  }, []); // Only run once on mount
+  }, []);
 
   // Resize when isExpanded prop changes
   useEffect(() => {
@@ -299,10 +376,15 @@ export function MapCanvas({ data, onFeatureAdd, onFeatureSelect, selectedFeature
         map.removeLayer(drawingLayerRef.current);
         drawingLayerRef.current = null;
       }
+      if (previewLineRef.current) {
+        map.removeLayer(previewLineRef.current);
+        previewLineRef.current = null;
+      }
+      setMeasurementInfo(null);
     }
   }, [drawMode]);
 
-  // ⭐ NEW: Change cursor based on draw mode
+  // Change cursor based on draw mode
   useEffect(() => {
     if (!containerRef.current) return;
 
@@ -401,7 +483,25 @@ export function MapCanvas({ data, onFeatureAdd, onFeatureSelect, selectedFeature
         </Button>
       </div>
 
-      {drawMode !== "none" && (
+      {/* ⭐ NEW: Measurement display */}
+      {measurementInfo && (drawMode === 'line' || drawMode === 'polygon') && (
+        <div 
+          className="absolute top-4 left-1/2 -translate-x-1/2 bg-primary text-primary-foreground px-4 py-2 rounded-md text-sm font-medium shadow-lg"
+          style={{ zIndex: Z_INDEX.DRAWING_HINT }}
+        >
+          <div className="flex items-center gap-4">
+            <span className="font-mono">
+              {measurementInfo.distance.toFixed(2)} nmi
+            </span>
+            <span className="opacity-50">•</span>
+            <span className="font-mono">
+              {measurementInfo.heading.toFixed(1)}°
+            </span>
+          </div>
+        </div>
+      )}
+
+      {drawMode !== "none" && !measurementInfo && (
         <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-primary text-primary-foreground px-4 py-2 rounded-md text-sm font-medium" style={{ zIndex: Z_INDEX.DRAWING_HINT }}>
           {drawMode === "point" && "Click to add a point"}
           {drawMode === "line" && "Click to add points, double-click to finish"}
